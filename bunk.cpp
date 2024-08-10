@@ -12,12 +12,18 @@ using std::string;
 using std::ifstream;
 using std::ofstream;
 using std::vector;
+using std::cout;
+
 
 typedef unsigned char byte;
 
-/* compressing the image would be best, as it would give a smaller file which would be less eyecatching*/
 
-vector<byte> generatesignature(int s){
+/*
+https://en.wikipedia.org/wiki/Vigen%C3%A8re_cipher
+*/
+
+
+vector<byte> signature(unsigned int s){
 	srand(s);
 	vector<byte> ret;
 	int bytelength = (rand() % 224) + 32;
@@ -29,133 +35,251 @@ vector<byte> generatesignature(int s){
 	return ret;
 }
 
-void dump(const string& execp, const string& imgp, const string& outp){
+	// 1byte to 1byte, future could do 1byte to nbytes to further encrypt, bingbong problem III esque
 
-	ifstream img(imgp, std::ios::binary);
+	/*
+	design
+		returns a vector of bytes that contains the vigenere key seeded by the given input image
+
+		go through each 8bit permutation (0-255 gives 256 distinct values)
+		for each one choose a random byte from a pre-initialized array
+			remove that value afterwards
+
+		should work for basic 1-1 byte vigenere cipher design
+	*/
+
+
+vector<byte> vigenerekey(unsigned int s){
+
+	srand(s);
+
+	vector<byte> k;
+	vector<byte> r;
+
+	for(int i=0; i<256; i++)
+		r.push_back(static_cast<byte>(i));
+
+
+	for(int i=0; i<256; i++){
+
+		if(r.empty()){
+			cout << "bunk: reference vector empty at iteration " << i << "\n";
+			break;
+		}
+
+		int j = rand() % r.size();
+		k.push_back(r[j]);
+		r.erase(r.begin() + j);
+	}
+
+	return k;
+}
+
+void dump(const string& publicp, const string& privatep, const string& outp){
+
+	ifstream img(privatep, std::ios::binary);
 
 	if(!img.is_open()){
-		std::cout << "bunk: source img crash";
+		cout << "bunk: source img crash";
+		img.close();
 		return;
 	}
 
-	ifstream exec(execp, std::ios::binary);
+	ifstream exec(publicp, std::ios::binary);
 
 	if(!exec.is_open()){
-		std::cout << "bunk: source exe crash";
+		cout << "bunk: source exe crash";
+		img.close();
+		exec.close();
 		return;
 	}
 
 	ofstream out(outp, std::ios::binary);
 
 	if(!out.is_open()){
-		std::cout << "bunk: target img crash";
+		cout << "bunk: target img crash";
+		img.close();
+		exec.close();
+		out.close();
 		return;
 	}
 
-	std::cout << "bunk: binaries open\n";
+	cout << "bunk: binaries open\n";
 
 	// first
 	out << img.rdbuf();
 
 	// sig
-	unsigned long sfi = INT_FAST32_MIN;
+	unsigned int sfi = INT_FAST32_MIN;
 	img.clear();
 	img.seekg(1024);
 
 	img.read(reinterpret_cast<char *>(&sfi), sizeof(sfi));
 
 	if(sfi == INT_FAST32_MIN){
-		std::cout << "bunk: failed getting seed from image\n";
+		cout << "bunk: failed getting seed from image\n";
+		img.close();
+		exec.close();
+		out.close();
 		return;
 	}
 
-	std::cout << "bunk: image seed given as " << sfi << "\n";
+	cout << "bunk: image seed given as " << sfi << "\n";
 	
-	vector<byte> bunksig = generatesignature(sfi);
+	vector<byte> sig = signature(sfi);
 
-	for(char c : bunksig){
+	for(char c : sig){
 		out.put(c);
 	}
 
-	// second
-	out << exec.rdbuf();
+	cout << "bunk: put signature\n";
 
-	std::cout << "bunk: buffers dumped into " << outp << "\n";
+	// second
+
+	vector<byte> vige = vigenerekey(sfi);
+
+	std::size_t nbytes = 2000000;
+	vector<char> buf(nbytes);
+	while(exec){
+		exec.read(buf.data(), nbytes);
+		const auto nread = exec.gcount();
+		if(!nread)
+			break;
+
+		vector<byte> bytes(buf.begin(), buf.begin() + nread);
+		for(int i=0; i<bytes.size(); i++){
+			byte c = bytes[i];
+			out.put(vige[c]);
+
+		}
+		
+	}
+
+
+	// out << exec.rdbuf();
+
+	cout << "bunk: encrypted bytes dumped into " << outp << "\n";
 
 	img.close();
 	exec.close();
 	out.close();
 
-	std::cout << "bunk: binaries closed\nbunk: out file at " << outp << std::endl;
+	cout << "bunk: binaries closed\nbunk: out file at " << outp << std::endl;
 }
 
-void extract(const std::string& bunkp, const std::string& outp) {
+void extract(const string& bunkp, const string& outp) {
+
     std::ifstream bnk(bunkp, std::ios::binary);
     if(!bnk.is_open()){
-        std::cout << "bunk: source img crash" << std::endl;
+        cout << "bunk: source img crash" << std::endl;
+		bnk.close();
         return;
     }
 
     std::ofstream out(outp, std::ios::binary);
     if(!out.is_open()){
-        std::cout << "bunk: target exe crash" << std::endl;
+        cout << "bunk: target exe crash" << std::endl;
+		bnk.close();
+		out.close();
         return;
     }
 
     const std::size_t nbytes = 2000000; // 2mb in buff
-    std::vector<char> buf(nbytes);
+    vector<char> buf(nbytes);
 
-	unsigned long sfi = INT_FAST32_MIN;
+	unsigned int sfi = INT_FAST32_MIN;
 
 	bnk.clear();
 	bnk.seekg(1024);
 	bnk.read(reinterpret_cast<char*>(&sfi), sizeof(sfi));
 
 	if(sfi == INT_FAST32_MIN){
-		std::cout << "bunk: failed getting seed from image\n";
+		cout << "bunk: failed getting seed from image\n";
+		bnk.close();
+		out.close();
 		return;
 	}
 
-	std::cout << "bunk: image seed given as " << sfi << "\n";
+	cout << "bunk: image seed given as " << sfi << "\n";
 
-	vector<byte> bunksig = generatesignature(sfi);
+	vector<byte> bunksig = signature(sfi);
 
 	bnk.clear();
 	bnk.seekg(0, std::ios::beg);
 
     if(bnk.read(buf.data(), buf.size()) || bnk.gcount() > 0){
         const auto nread = bnk.gcount();
-        std::cout << "bunk: read " << nread << " bytes from input " << bunkp << "\n";
+        cout << "bunk: read " << nread << " bytes from input " << bunkp << "\n";
 
-        std::vector<byte> bytes(buf.begin(), buf.begin() + nread);
+        vector<byte> bytes_find(buf.begin(), buf.begin() + nread);
 
-        auto it = std::search(bytes.begin(), bytes.end(), bunksig.begin(), bunksig.end());
+        auto it = std::search(bytes_find.begin(), bytes_find.end(), bunksig.begin(), bunksig.end());
 
-        if(it != bytes.end()){
-            int idx = std::distance(bytes.begin(), it) + bunksig.size();
-            std::cout << "bunk: signature found at byte " << std::distance(bytes.begin(), it) << ", dumping bytes to " << outp << "\n";
+        if(it != bytes_find.end()){
+            int idx = std::distance(bytes_find.begin(), it) + bunksig.size();
+            cout << "bunk: signature found at byte " << idx - bunksig.size() << ", dumping bytes to " << outp << "\n";
 
-            out.write(reinterpret_cast<char*>(&bytes[idx]), nread - idx);
+			// writing to out
+			bnk.clear();
+			bnk.seekg(idx);
 
-            while (bnk.read(buf.data(), buf.size())) { // i hate buffers!
-                out.write(buf.data(), buf.size());
-				std::cout << "bunk: read " << buf.size() << " bytes from input " << bunkp << "\n";
-            }
+			if(!bnk){
+				cout << "bunk: failure navigating binary " << bunkp << "\n";
+				bnk.close();
+				out.close();
+				return;
+			}
 
-            out.write(buf.data(), bnk.gcount()); // see above
+			vector<byte> vige = vigenerekey(sfi);
+			buf.resize(nbytes);
 
-            std::cout << "bunk: bytes dumped into " << outp << "\n";
+			while(bnk){
+				bnk.read(buf.data(), nbytes);
+				const auto nread = bnk.gcount();
+				if(!nread)
+					break;
+
+				vector<byte> bytes_out(buf.begin(), buf.begin() + nread);
+				for(int i=0; i<bytes_out.size(); i++){
+					byte c = bytes_out[i];
+					auto iterator_loc = std::find(vige.begin(), vige.end(), c);
+
+					if(iterator_loc==vige.end()){
+						cout << "bunk: decryption failure on encrypted byte " << c << "\n";
+						bnk.close();
+						out.close();
+						return;
+					}
+
+					int o = iterator_loc - vige.begin();
+					// cout << c << " to " << static_cast<char>(o) << "\n";
+					out.put(o);
+				}
+			}
+
+            // out.write(reinterpret_cast<char*>(&bytes[idx]), nread - idx);
+
+            // while (bnk.read(buf.data(), buf.size())) { // i hate buffers!
+            //     out.write(buf.data(), buf.size());
+			// 	cout << "bunk: read " << buf.size() << " bytes from input " << bunkp << "\n";
+            // }
+
+            // out.write(buf.data(), bnk.gcount()); // see above
+
+            cout << "bunk: decrypted bytes dumped into " << outp << "\n";
         }else{
-            std::cout << "bunk: failed to find signature" << std::endl;
+            cout << "bunk: failed to find signature" << std::endl;
+			bnk.close();
+			out.close();
 			return;
         }
 
         bnk.close();
         out.close();
 
-        std::cout << "bunk: out file at " << outp << std::endl;
+        cout << "bunk: out file at " << outp << std::endl;
     } else {
-        std::cout << "bunk: failed to read input " << bunkp << std::endl;
+        cout << "bunk: failed to read input " << bunkp << std::endl;
     }
 }
 
@@ -184,7 +308,7 @@ int main(){
 	else if(splargs[0]=="hide")
 		dump(splargs[1], splargs[2], splargs[3]);
 	
-	else if(splargs[0]=="find")
+	else if(splargs[0]=="extract")
 		extract(splargs[1], splargs[2]);
 	
 }
