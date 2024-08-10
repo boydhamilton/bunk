@@ -310,5 +310,10 @@ int main(){
 	
 	else if(splargs[0]=="extract")
 		extract(splargs[1], splargs[2]);
+
+	// end prog
+	cout << "operation successful, enter key to quit" << std::endl;
+	getchar();
+	return 0;
 	
 }
